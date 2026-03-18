@@ -72,7 +72,7 @@
     /* --- Music Controls --- */
     #controls {
       position: fixed;
-      bottom: 30px;
+      bottom: 90px;
       left: 50%;
       transform: translateX(-50%);
       z-index: 50;
@@ -867,9 +867,12 @@
       if (!audioReady) return;
       analyser.getByteFrequencyData(freqData);
       const bars = vizEl.children;
-      const step = Math.floor(freqData.length / bars.length);
+      // Map the 64 bars 1-to-1 with the first 64 frequency bins (roughly 0-11kHz)
+      // This ignores the upper bins (>11kHz) where there is rarely energy in standard pop music,
+      // preventing the right side of the visualizer from looking empty.
       for (let i = 0; i < bars.length; i++) {
-        const val = freqData[i * step] / 255;
+        // Apply a slight exponential boost to higher indices so they don't look completely flat compared to bass
+        const val = freqData[i] / 255;
         bars[i].style.height = (val * 70 + 2) + 'px';
       }
     }
