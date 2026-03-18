@@ -494,46 +494,38 @@
       // Sphere parameters
       const rotY = time * 0.4;
       const rotX = 0.3;
-      const tileRows = 20;
+      const tileRows = 24; // Increased rows slightly for smoother round density
       const cosRx = Math.cos(rotX), sinRx = Math.sin(rotX);
       const perspective = 3.5;
 
-      // Solid opaque backing sphere (black/dark gray)
+      // Solid opaque backing sphere (ambient dark color)
+      // Drawn with anti-aliasing (slight soft edge) to prevent jagged silhouette
       ctx.beginPath();
-      ctx.arc(centerX, centerY, ballRadius * 0.98, 0, Math.PI * 2);
-      ctx.fillStyle = '#111';
+      ctx.arc(centerX, centerY, ballRadius * 0.99, 0, Math.PI * 2);
+      const bgGrad = ctx.createRadialGradient(
+        centerX, centerY, ballRadius * 0.95,
+        centerX, centerY, ballRadius
+      );
+      bgGrad.addColorStop(0, '#151518');
+      bgGrad.addColorStop(0.8, '#08080a');
+      bgGrad.addColorStop(1, 'transparent');
+      ctx.fillStyle = bgGrad;
       ctx.fill();
 
       // Collect visible tiles for depth sorting
       const tiles = [];
 
       for (let row = 0; row < tileRows; row++) {
-        const phi1 = (row / tileRows) * Math.PI;
-        const phi2 = ((row + 1) / tileRows) * Math.PI;
-        const y1 = Math.cos(phi1);
-        const y2 = Math.cos(phi2);
-        const r1 = Math.sin(phi1);
-        const r2 = Math.sin(phi2);
-
-        // Calculate tile center for normals
+        // Calculate tile center
         const phiC = ((row + 0.5) / tileRows) * Math.PI;
         const yC = Math.cos(phiC);
         const rC = Math.sin(phiC);
 
-        const tileCols = Math.max(4, Math.floor(tileRows * 2 * rC));
+        // Adjust columns based on latitude so circles remain roughly same physical size
+        const tileCols = Math.max(4, Math.floor(tileRows * 2.5 * rC));
 
         for (let col = 0; col < tileCols; col++) {
-          const theta1 = (col / tileCols) * Math.PI * 2 + rotY;
-          const theta2 = ((col + 1) / tileCols) * Math.PI * 2 + rotY;
           const thetaC = ((col + 0.5) / tileCols) * Math.PI * 2 + rotY;
-
-          // 3D corners of the tile (square/trapezoid on sphere surface)
-          const corners3D = [
-            [r1 * Math.cos(theta1), y1, r1 * Math.sin(theta1)],
-            [r1 * Math.cos(theta2), y1, r1 * Math.sin(theta2)],
-            [r2 * Math.cos(theta2), y2, r2 * Math.sin(theta2)],
-            [r2 * Math.cos(theta1), y2, r2 * Math.sin(theta1)],
-          ];
 
           // Center of the tile
           const cx3 = rC * Math.cos(thetaC);
@@ -547,59 +539,77 @@
           // Back-face culling
           if (rz < -0.05) continue;
 
-          // Project corners
-          const projected = corners3D.map(([x, y, z]) => {
-            const ny = y * cosRx - z * sinRx;
-            const nz = y * sinRx + z * cosRx;
-            const scale = perspective / (perspective + nz);
-            return [centerX + x * ballRadius * scale, centerY - ny * ballRadius * scale];
-          });
+          // Project center to 2D
+          const scale = perspective / (perspective + rz);
+          const px = centerX + cx3 * ballRadius * scale;
+          const py = centerY - ry * ballRadius * scale;
+
+          // Ideal circular radius of this sticker on the screen
+          const baseRadius = (ballRadius * Math.PI / tileRows) * 0.45 * scale;
+
+          // Determine ellipse squash based on surface normal facing the camera
+          // The surface normal is (cx3, cy3, cz3) rotated. 
+          // After rotation, the normal is (cx3, ry, rz).
+          // The vector facing camera is (0,0,1). The dot product is rz.
+          // rz goes from 1 (facing camera) to 0 (edge). This is the squash ratio.
+          const squash = Math.max(0.1, rz);
+
+          // The ellipse minor axis points towards the center of the sphere in 2D
+          // Angle from sphere center to projected tile center
+          const angleToCenter = Math.atan2(py - centerY, px - centerX);
 
           // Reflection angle: the tile's outward normal in screen-space XY
           const reflAngle = Math.atan2(-ry, cx3);
 
-          tiles.push({ projected, rz, cx3, ry, reflAngle, row, col });
+          tiles.push({ px, py, baseRadius, squash, angleToCenter, rz, cx3, ry, reflAngle, row, col });
         }
       }
 
       // Sort back-to-front
       tiles.sort((a, b) => a.rz - b.rz);
 
-      // Draw each tile as a flat metallic mirror patch
+      // Draw each tile as a circular flat sequin/mirror
       for (const t of tiles) {
-        const { projected, rz, reflAngle } = t;
+        const { px, py, baseRadius, squash, angleToCenter, rz, reflAngle } = t;
         const facing = Math.max(0, rz); // 0 at edge, 1 at front
 
         // Get reflected beam hue (physics: tile reflects light from beam at reflAngle)
         const reflHue = getBeamHueAtAngle(reflAngle, time);
 
-        // Draw the flat tile polygon
+        // Draw the perspective-distorted circular tile (ellipse)
         ctx.beginPath();
-        ctx.moveTo(projected[0][0], projected[0][1]);
-        for (let k = 1; k < 4; k++) {
-          ctx.lineTo(projected[k][0], projected[k][1]);
-        }
-        ctx.closePath();
+        ctx.ellipse(
+          px, py,
+          baseRadius * squash, // minor axis (squashed by perspective)
+          baseRadius,          // major axis (un-squashed tangent to sphere surface)
+          angleToCenter,       // rotation to align squash towards sphere center
+          0, Math.PI * 2
+        );
 
         // Base metallic color reflecting the environment
-        const sat = 65 + facing * 35; // 65-100% saturation
-        const light = 35 + facing * 45; // 35-80% lightness
-        ctx.fillStyle = `hsl(${reflHue}, ${sat}%, ${light}%)`;
+        const sat = 55 + facing * 45; // 55-100% saturation
+        const light = 40 + facing * 45; // 40-85% lightness
+        
+        // Add a subtle metallic radial inner glow to make it look like a physical sequin
+        const tileGrad = ctx.createRadialGradient(px, py, 0, px, py, baseRadius);
+        tileGrad.addColorStop(0, `hsl(${reflHue}, ${sat}%, ${light + 10}%)`);
+        tileGrad.addColorStop(0.8, `hsl(${reflHue}, ${sat}%, ${light}%)`);
+        tileGrad.addColorStop(1, `hsl(${reflHue}, 30%, ${light - 20}%)`); // dark rim 
+
+        ctx.fillStyle = tileGrad;
         ctx.fill();
 
-        // Draw an inner bright highlight to simulate a flat glass/mirror bevel
-        ctx.strokeStyle = `hsla(${reflHue}, 100%, 90%, ${0.2 + facing * 0.6})`;
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        // Draw darker outer bevel (gap between mirrors)
-        ctx.strokeStyle = '#111';
-        ctx.lineWidth = 2; // Dark grout between tiles
-        ctx.stroke();
-
         // Extra bright specular flash on some front tiles to simulate intense laser reflection
-        if (facing > 0.7 && Math.sin(time * 3.5 + t.row * 7.3 + t.col * 11.7) > 0.85) {
-          ctx.fillStyle = `rgba(255, 255, 255, ${0.4 + facing * 0.4})`;
+        if (facing > 0.6 && Math.sin(time * 3.5 + t.row * 7.3 + t.col * 11.7) > 0.8) {
+          ctx.beginPath();
+          ctx.ellipse(
+            px, py,
+            baseRadius * squash * 0.4,
+            baseRadius * 0.4,
+            angleToCenter,
+            0, Math.PI * 2
+          );
+          ctx.fillStyle = `rgba(255, 255, 255, ${0.5 + facing * 0.5})`;
           ctx.fill();
         }
       }
