@@ -511,7 +511,7 @@
       // Sphere parameters
       const rotY = time * 0.4;
       const rotX = 0.3;
-      const tileRows = 24; // Increased rows slightly for smoother round density
+      const tileRows = 16; // Decreased rows to make tiles significantly larger
       const cosRx = Math.cos(rotX), sinRx = Math.sin(rotX);
       const perspective = 3.5;
 
@@ -545,9 +545,8 @@
         const rC = Math.sin(phiC);
 
         // Adjust columns based on latitude so circles remain roughly same physical size
-        // Use 2.0 multiplier to exactly match proportional circumference (2*pi*r vs pi*r)
-        // This ensures the tiles don't overly squash or overlap side to side
-        const tileCols = Math.max(4, Math.floor(tileRows * 2.0 * rC));
+        // Use ~2.1 multiplier to balance horizontal spacing for larger tiles
+        const tileCols = Math.max(4, Math.floor(tileRows * 2.1 * rC));
 
         for (let col = 0; col < tileCols; col++) {
           const thetaC = ((col + 0.5) / tileCols) * Math.PI * 2 + rotY;
@@ -575,7 +574,8 @@
           const py = centerY - ry * ballRadius * scale;
 
           // Ideal circular radius of this sticker on the screen
-          const baseRadius = (ballRadius * Math.PI / tileRows) * 0.45 * scale;
+          // Increased size multiplier slightly to fill space better with fewer rows
+          const baseRadius = (ballRadius * Math.PI / tileRows) * 0.46 * scale;
 
           // Determine ellipse squash based on surface normal facing the camera
           const squash = Math.max(0.1, nz);
