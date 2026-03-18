@@ -500,6 +500,7 @@
 
       // Solid opaque backing sphere (ambient dark color)
       // Drawn with anti-aliasing (slight soft edge) to prevent jagged silhouette
+      ctx.save();
       ctx.beginPath();
       ctx.arc(centerX, centerY, ballRadius * 0.99, 0, Math.PI * 2);
       const bgGrad = ctx.createRadialGradient(
@@ -512,6 +513,11 @@
       ctx.fillStyle = bgGrad;
       ctx.fill();
 
+      // Clip the rendering of all tiles so they physically cannot float outside the sphere surface
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, ballRadius * 0.985, 0, Math.PI * 2);
+      ctx.clip();
+
       // Collect visible tiles for depth sorting
       const tiles = [];
 
@@ -522,7 +528,9 @@
         const rC = Math.sin(phiC);
 
         // Adjust columns based on latitude so circles remain roughly same physical size
-        const tileCols = Math.max(4, Math.floor(tileRows * 2.5 * rC));
+        // Use 2.0 multiplier to exactly match proportional circumference (2*pi*r vs pi*r)
+        // This ensures the tiles don't overly squash or overlap side to side
+        const tileCols = Math.max(4, Math.floor(tileRows * 2.0 * rC));
 
         for (let col = 0; col < tileCols; col++) {
           const thetaC = ((col + 0.5) / tileCols) * Math.PI * 2 + rotY;
@@ -604,15 +612,17 @@
           ctx.beginPath();
           ctx.ellipse(
             px, py,
-            baseRadius * squash * 0.4,
-            baseRadius * 0.4,
+            baseRadius * squash, // Highlight exactly covers the whole distorted tile
+            baseRadius,
             angleToCenter,
             0, Math.PI * 2
           );
-          ctx.fillStyle = `rgba(255, 255, 255, ${0.5 + facing * 0.5})`;
+          ctx.fillStyle = `rgba(255, 255, 255, ${0.4 + facing * 0.5})`;
           ctx.fill();
         }
       }
+
+      ctx.restore(); // Remove clipping mask for tiles
 
       // Overall ball specular highlight (upper-left sheen)
       const specGrad = ctx.createRadialGradient(
