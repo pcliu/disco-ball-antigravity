@@ -449,7 +449,8 @@
       cg.addColorStop(0.6, `rgba(150, 100, 220, ${0.05 * bassMul})`);
       cg.addColorStop(1, 'transparent');
       ctx.fillStyle = cg;
-      ctx.fillRect(-ballRadius * 3, -ballRadius * 3, ballRadius * 6, ballRadius * 6);
+      // Draw over a large enough area to guarantee it covers extreme wide/tall monitors without seams
+      ctx.fillRect(-maxLen, -maxLen, maxLen * 2, maxLen * 2);
 
       // Layer 2: Bright accent beams — fewer, brighter, distinct rays
       const accents = 16;
