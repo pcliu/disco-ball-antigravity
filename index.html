@@ -482,6 +482,23 @@
     function drawDiscoBall(time, energy) {
       const bassMul = 1 + energy.bass * 0.3;
 
+      // Define 4 dynamic, roaming light sources orbiting the disco ball for realistic specular highlights
+      // They move at different speeds and orbital inclinations
+      const lightSources = [
+        { x: Math.cos(time * 0.5) * 3, y: Math.sin(time * 0.3) * 2, z: Math.sin(time * 0.5) * 3 + 4, intensity: 1.0 },
+        { x: Math.sin(time * 0.7 + 2) * 4, y: Math.cos(time * 0.6 + 1) * 3, z: Math.cos(time * 0.4) * 2 + 5, intensity: 0.8 },
+        { x: Math.cos(time * 0.4 + 4) * 3.5, y: Math.sin(time * 0.8 + 3) * 3.5, z: Math.sin(time * 0.6) * 3 + 4.5, intensity: 0.9 },
+        { x: Math.sin(time * 0.2 + 5) * 5, y: Math.cos(time * 0.5 + 4) * 2, z: Math.cos(time * 0.3) * 4 + 6, intensity: 0.7 }
+      ];
+
+      // Normalize light positions
+      for (let ls of lightSources) {
+        const len = Math.hypot(ls.x, ls.y, ls.z);
+        ls.nx = ls.x / len;
+        ls.ny = ls.y / len;
+        ls.nz = ls.z / len;
+      }
+
       // Ambient glow behind ball
       const glowSize = ballRadius * 2.5 * bassMul;
       const glow = ctx.createRadialGradient(centerX, centerY, ballRadius * 0.5, centerX, centerY, glowSize);
@@ -540,15 +557,20 @@
           const cy3 = yC;
           const cz3 = rC * Math.sin(thetaC);
 
-          // Apply tilt rotation (X axis)
+          // Apply tilt rotation (X axis) to get final 3D normal for the tile
           const ry = cy3 * cosRx - cz3 * sinRx;
           const rz = cy3 * sinRx + cz3 * cosRx;
 
+          // The tile's true 3D normal vector (nx, ny, nz)
+          const nx = cx3;
+          const ny = ry;
+          const nz = rz;
+
           // Back-face culling
-          if (rz < -0.05) continue;
+          if (nz < -0.05) continue;
 
           // Project center to 2D
-          const scale = perspective / (perspective + rz);
+          const scale = perspective / (perspective + nz);
           const px = centerX + cx3 * ballRadius * scale;
           const py = centerY - ry * ballRadius * scale;
 
@@ -556,20 +578,38 @@
           const baseRadius = (ballRadius * Math.PI / tileRows) * 0.45 * scale;
 
           // Determine ellipse squash based on surface normal facing the camera
-          // The surface normal is (cx3, cy3, cz3) rotated. 
-          // After rotation, the normal is (cx3, ry, rz).
-          // The vector facing camera is (0,0,1). The dot product is rz.
-          // rz goes from 1 (facing camera) to 0 (edge). This is the squash ratio.
-          const squash = Math.max(0.1, rz);
+          const squash = Math.max(0.1, nz);
 
           // The ellipse minor axis points towards the center of the sphere in 2D
-          // Angle from sphere center to projected tile center
           const angleToCenter = Math.atan2(py - centerY, px - centerX);
 
           // Reflection angle: the tile's outward normal in screen-space XY
-          const reflAngle = Math.atan2(-ry, cx3);
+          const reflAngle = Math.atan2(-ny, nx);
+          
+          // Calculate dynamic specular highlights from all roaming light sources
+          let totalSpecular = 0;
+          
+          // The view vector is looking straight down the Z axis towards the ball
+          const vx = 0, vy = 0, vz = 1;
+          
+          for (let ls of lightSources) {
+            // Half-vector between view direction and light source direction
+            let hx = ls.nx + vx;
+            let hy = ls.ny + vy;
+            let hz = ls.nz + vz;
+            const hlen = Math.hypot(hx, hy, hz);
+            hx /= hlen; hy /= hlen; hz /= hlen;
+            
+            // Dot product of tile normal and half-vector (Blinn-Phong specular)
+            let nDotH = nx * hx + ny * hy + nz * hz;
+            if (nDotH > 0) {
+              // High shininess exponent for sharp mirrored reflections
+              const spec = Math.pow(nDotH, 80) * ls.intensity;
+              totalSpecular += spec * 1.5; // Boost visibility
+            }
+          }
 
-          tiles.push({ px, py, baseRadius, squash, angleToCenter, rz, cx3, ry, reflAngle, row, col });
+          tiles.push({ px, py, baseRadius, squash, angleToCenter, rz: nz, reflAngle, totalSpecular });
         }
       }
 
@@ -578,7 +618,7 @@
 
       // Draw each tile as a circular flat sequin/mirror
       for (const t of tiles) {
-        const { px, py, baseRadius, squash, angleToCenter, rz, reflAngle } = t;
+        const { px, py, baseRadius, squash, angleToCenter, rz, reflAngle, totalSpecular } = t;
         const facing = Math.max(0, rz); // 0 at edge, 1 at front
 
         // Get reflected beam hue (physics: tile reflects light from beam at reflAngle)
@@ -607,18 +647,26 @@
         ctx.fillStyle = tileGrad;
         ctx.fill();
 
-        // Extra bright specular flash on some front tiles to simulate intense laser reflection
-        if (facing > 0.6 && Math.sin(time * 3.5 + t.row * 7.3 + t.col * 11.7) > 0.8) {
+        // Dynamic roaming specular flash from external light sources
+        if (totalSpecular > 0.05) {
           ctx.beginPath();
-          ctx.ellipse(
-            px, py,
-            baseRadius * squash, // Highlight exactly covers the whole distorted tile
-            baseRadius,
-            angleToCenter,
-            0, Math.PI * 2
-          );
-          ctx.fillStyle = `rgba(255, 255, 255, ${0.4 + facing * 0.5})`;
-          ctx.fill();
+          // The bright white highlight scales completely over the tile based on intensity
+          const specRadius = baseRadius * Math.min(1.0, totalSpecular * 1.2);
+          const specSquash = squash * Math.min(1.0, totalSpecular * 1.2);
+          
+          if (specRadius > 0.1) {
+            ctx.ellipse(
+              px, py,
+              specRadius * specSquash,
+              specRadius,
+              angleToCenter,
+              0, Math.PI * 2
+            );
+            
+            // Bright white to strong color bloom
+            ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(1.0, totalSpecular * 1.5)})`;
+            ctx.fill();
+          }
         }
       }
 
