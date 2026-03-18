@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Interactive colorful disco ball with music and light effects">
+  <title>✨ Disco Ball Party ✨</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;600;800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: #000;
+      font-family: 'Outfit', sans-serif;
+      cursor: default;
+      user-select: none;
+    }
+
+    canvas#mainCanvas {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+    }
+
+    /* --- Start Overlay --- */
+    #startOverlay {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(ellipse at center, rgba(20,0,40,0.95) 0%, rgba(0,0,0,0.98) 100%);
+      transition: opacity 0.8s ease, visibility 0.8s ease;
+    }
+    #startOverlay.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+    #startOverlay h1 {
+      font-size: clamp(2rem, 6vw, 4.5rem);
+      font-weight: 800;
+      background: linear-gradient(135deg, #ff6ec7, #7873f5, #4fc3f7, #81c784, #fff176, #ff8a65, #ff6ec7);
+      background-size: 300% 300%;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: gradientShift 4s ease infinite;
+      margin-bottom: 1rem;
+      text-align: center;
+    }
+    #startOverlay p {
+      color: rgba(255,255,255,0.6);
+      font-size: clamp(0.9rem, 2vw, 1.3rem);
+      font-weight: 300;
+      letter-spacing: 0.15em;
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes gradientShift {
+      0%, 100% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.5; }
+      50% { opacity: 1; }
+    }
+
+    /* --- Music Controls --- */
+    #controls {
+      position: fixed;
+      bottom: 30px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      background: rgba(255,255,255,0.08);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 50px;
+      padding: 12px 28px;
+      opacity: 0;
+      transition: opacity 0.6s ease;
+    }
+    #controls.visible { opacity: 1; }
+
+    #playBtn {
+      width: 44px; height: 44px;
+      border: none;
+      background: linear-gradient(135deg, #7873f5, #ff6ec7);
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.2s ease, box-shadow 0.3s ease;
+      box-shadow: 0 0 20px rgba(120,115,245,0.4);
+    }
+    #playBtn:hover {
+      transform: scale(1.1);
+      box-shadow: 0 0 30px rgba(120,115,245,0.6);
+    }
+    #playBtn svg { width: 20px; height: 20px; fill: #fff; }
+
+    #trackName {
+      color: rgba(255,255,255,0.75);
+      font-size: 0.85rem;
+      font-weight: 300;
+      letter-spacing: 0.05em;
+      max-width: 200px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #volumeSlider {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 90px;
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(255,255,255,0.2);
+      outline: none;
+      cursor: pointer;
+    }
+    #volumeSlider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 0 8px rgba(255,255,255,0.5);
+      cursor: pointer;
+    }
+
+    /* --- Visualizer Bars --- */
+    #visualizer {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 80px;
+      z-index: 10;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      gap: 2px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 1s ease;
+    }
+    #visualizer.visible { opacity: 0.5; }
+    .viz-bar {
+      width: 3px;
+      min-height: 2px;
+      border-radius: 2px 2px 0 0;
+      transition: height 0.05s ease;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="mainCanvas"></canvas>
+
+  <div id="startOverlay">
+    <h1>🪩 Disco Ball Party</h1>
+    <p>Click anywhere to start</p>
+  </div>
+
+  <div id="controls">
+    <button id="playBtn" aria-label="Play/Pause">
+      <svg id="playIcon" viewBox="0 0 24 24"><polygon points="6,4 20,12 6,20"/></svg>
+      <svg id="pauseIcon" viewBox="0 0 24 24" style="display:none"><rect x="5" y="4" width="4" height="16"/><rect x="15" y="4" width="4" height="16"/></svg>
+    </button>
+    <span id="trackName">街角的晚風</span>
+    <input type="range" id="volumeSlider" min="0" max="1" step="0.01" value="0.7">
+  </div>
+
+  <div id="visualizer"></div>
+
+  <script>
+  // ===================================================================
+  //  DISCO BALL — Main Application
+  // ===================================================================
+  (() => {
+    'use strict';
+
+    // --- Canvas Setup ---
+    const canvas = document.getElementById('mainCanvas');
+    const ctx = canvas.getContext('2d');
+    let W, H, centerX, centerY, ballRadius;
+
+    function resize() {
+      W = canvas.width = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+      centerX = W / 2;
+      centerY = H / 2;
+      ballRadius = Math.min(W, H) * 0.22;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    // --- Audio Setup ---
+    let audioCtx, analyser, source, freqData, audio;
+    let audioReady = false;
+    let isPlaying = false;
+
+    const playBtn = document.getElementById('playBtn');
+    const playIcon = document.getElementById('playIcon');
+    const pauseIcon = document.getElementById('pauseIcon');
+    const volumeSlider = document.getElementById('volumeSlider');
+    const controlsEl = document.getElementById('controls');
+    const vizEl = document.getElementById('visualizer');
+    const overlay = document.getElementById('startOverlay');
+
+    function initAudio() {
+      audio = new Audio('music/街角的晚風.mp3');
+      audio.crossOrigin = 'anonymous';
+      audio.loop = true;
+      audio.volume = parseFloat(volumeSlider.value);
+
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      source = audioCtx.createMediaElementSource(audio);
+      source.connect(analyser);
+      analyser.connect(audioCtx.destination);
+      freqData = new Uint8Array(analyser.frequencyBinCount);
+      audioReady = true;
+
+      // Create visualizer bars
+      const barCount = 64;
+      for (let i = 0; i < barCount; i++) {
+        const bar = document.createElement('div');
+        bar.className = 'viz-bar';
+        const hue = (i / barCount) * 360;
+        bar.style.background = `hsl(${hue}, 80%, 60%)`;
+        vizEl.appendChild(bar);
+      }
+    }
+
+    function togglePlay() {
+      if (!audioReady) return;
+      if (isPlaying) {
+        audio.pause();
+        playIcon.style.display = '';
+        pauseIcon.style.display = 'none';
+      } else {
+        audio.play();
+        playIcon.style.display = 'none';
+        pauseIcon.style.display = '';
+      }
+      isPlaying = !isPlaying;
+    }
+
+    playBtn.addEventListener('click', togglePlay);
+    volumeSlider.addEventListener('input', () => {
+      if (audio) audio.volume = parseFloat(volumeSlider.value);
+    });
+
+    // Start on click
+    overlay.addEventListener('click', () => {
+      overlay.classList.add('hidden');
+      initAudio();
+      audio.play().then(() => {
+        isPlaying = true;
+        playIcon.style.display = 'none';
+        pauseIcon.style.display = '';
+      }).catch(() => {});
+      controlsEl.classList.add('visible');
+      vizEl.classList.add('visible');
+    });
+
+    // --- Helper Functions ---
+    function getAudioEnergy() {
+      if (!audioReady || !freqData) return { bass: 0, mid: 0, treble: 0, overall: 0 };
+      analyser.getByteFrequencyData(freqData);
+      const len = freqData.length;
+      let bass = 0, mid = 0, treble = 0;
+      const bassEnd = Math.floor(len * 0.15);
+      const midEnd = Math.floor(len * 0.5);
+      for (let i = 0; i < len; i++) {
+        const v = freqData[i] / 255;
+        if (i < bassEnd) bass += v;
+        else if (i < midEnd) mid += v;
+        else treble += v;
+      }
+      bass /= bassEnd || 1;
+      mid /= (midEnd - bassEnd) || 1;
+      treble /= (len - midEnd) || 1;
+      const overall = (bass + mid + treble) / 3;
+      return { bass, mid, treble, overall };
+    }
+
+    // --- Sparkle System ---
+    class Sparkle {
+      constructor(isHero = false) {
+        this.isHero = isHero;
+        this.reset();
+      }
+      reset() {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = ballRadius * (0.5 + Math.random() * 2.0);
+        this.x = centerX + Math.cos(angle) * dist;
+        this.y = centerY + Math.sin(angle) * dist;
+        if (this.isHero) {
+          this.size = 15 + Math.random() * 25;
+          this.maxAlpha = 0.7 + Math.random() * 0.3;
+          this.speed = 0.015 + Math.random() * 0.025;
+          this.maxLife = 100 + Math.random() * 160;
+          this.glowMul = 3.5;
+        } else {
+          this.size = 2 + Math.random() * 6;
+          this.maxAlpha = 0.4 + Math.random() * 0.6;
+          this.speed = 0.02 + Math.random() * 0.04;
+          this.maxLife = 60 + Math.random() * 120;
+          this.glowMul = 2;
+        }
+        this.alpha = 0;
+        this.phase = Math.random() * Math.PI * 2;
+        this.life = 0;
+        this.hue = Math.random() * 360;
+      }
+      update(energy) {
+        this.life++;
+        const speedMul = 1 + energy.treble * 2;
+        this.phase += this.speed * speedMul;
+        this.alpha = this.maxAlpha * Math.pow(Math.sin(this.phase), 2);
+        if (this.life > this.maxLife) this.reset();
+      }
+      draw(ctx) {
+        if (this.alpha < 0.01) return;
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        ctx.globalAlpha = this.alpha;
+
+        const s = this.size;
+        // Outer glow first (behind the star)
+        const glR = s * this.glowMul;
+        const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, glR);
+        glow.addColorStop(0, `hsla(${this.hue}, 70%, 90%, ${this.isHero ? 0.6 : 0.35})`);
+        glow.addColorStop(0.4, `hsla(${this.hue}, 80%, 75%, ${this.isHero ? 0.25 : 0.12})`);
+        glow.addColorStop(1, 'transparent');
+        ctx.fillStyle = glow;
+        ctx.fillRect(-glR, -glR, glR * 2, glR * 2);
+
+        // Four-pointed star
+        const thin = this.isHero ? 0.08 : 0.15;
+        ctx.fillStyle = this.isHero
+          ? `hsla(${this.hue}, 50%, 95%, 1)`
+          : `hsla(${this.hue}, 80%, 85%, 1)`;
+        ctx.beginPath();
+        ctx.moveTo(0, -s);
+        ctx.quadraticCurveTo(s * thin, -s * thin, s, 0);
+        ctx.quadraticCurveTo(s * thin, s * thin, 0, s);
+        ctx.quadraticCurveTo(-s * thin, s * thin, -s, 0);
+        ctx.quadraticCurveTo(-s * thin, -s * thin, 0, -s);
+        ctx.fill();
+
+        // Core bright center for hero sparkles
+        if (this.isHero) {
+          const core = ctx.createRadialGradient(0, 0, 0, 0, 0, s * 0.3);
+          core.addColorStop(0, 'rgba(255,255,255,0.9)');
+          core.addColorStop(1, 'transparent');
+          ctx.fillStyle = core;
+          ctx.fillRect(-s * 0.3, -s * 0.3, s * 0.6, s * 0.6);
+        }
+
+        ctx.restore();
+      }
+    }
+
+    // 70 normal sparkles + 8 large hero sparkles
+    const sparkles = [
+      ...Array.from({ length: 70 }, () => new Sparkle(false)),
+      ...Array.from({ length: 8 }, () => new Sparkle(true)),
+    ];
+
+    // --- Global beam rotation offset (used by both beams and ball reflections) ---
+    const BEAM_ROTATION_SPEED = 0.12;
+    const BEAM_HUE_SPEED = 25;
+
+    function getBeamHueAtAngle(angle, time) {
+      // Normalized angle to 0-1
+      const norm = ((angle - time * BEAM_ROTATION_SPEED) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+      return (norm / (Math.PI * 2) * 360 + time * BEAM_HUE_SPEED) % 360;
+    }
+
+    // --- Light Beams (Continuous Spectrum) ---
+    function drawLightBeams(time, energy) {
+      const bassMul = 1 + energy.bass * 1.5;
+      const maxLen = Math.max(W, H) * 1.1;
+
+      ctx.save();
+      ctx.translate(centerX, centerY);
+
+      // Layer 1: Continuous smooth spectrum — 120 wedges with tight overlap
+      // Use source-over so overlaps don't create bright stripes
+      ctx.globalCompositeOperation = 'source-over';
+      const segments = 120;
+      const segAngle = (Math.PI * 2) / segments;
+      const overlap = 1.05; // Just enough to hide pixel seams
+
+      for (let i = 0; i < segments; i++) {
+        const midAngle = i * segAngle + time * BEAM_ROTATION_SPEED;
+        const halfW = segAngle * overlap * 0.5;
+        const a1 = midAngle - halfW;
+        const a2 = midAngle + halfW;
+        const hue = ((i / segments) * 360 + time * BEAM_HUE_SPEED) % 360;
+        const lenVar = 0.85 + 0.15 * Math.sin(time * 1.2 + i * 0.25);
+        const len = maxLen * lenVar * bassMul;
+        
+        // Base alpha is much more subtle so it fades nicely into the dark background
+        const alpha = (0.20 + 0.08 * Math.sin(time * 2 + i * 0.4)) * bassMul;
+
+        const ex = Math.cos(midAngle) * len;
+        const ey = Math.sin(midAngle) * len;
+        const grad = ctx.createLinearGradient(
+          Math.cos(midAngle) * ballRadius * 0.25,
+          Math.sin(midAngle) * ballRadius * 0.25,
+          ex, ey
+        );
+        grad.addColorStop(0, `hsla(${hue}, 100%, 75%, ${Math.min(alpha * 1.8, 0.8)})`);
+        grad.addColorStop(0.2, `hsla(${hue}, 95%, 60%, ${Math.min(alpha * 1.2, 0.5)})`);
+        grad.addColorStop(0.6, `hsla(${hue}, 85%, 45%, ${alpha * 0.5})`);
+        grad.addColorStop(1, 'transparent');
+
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a1) * ballRadius * 0.2, Math.sin(a1) * ballRadius * 0.2);
+        ctx.lineTo(Math.cos(a1) * len, Math.sin(a1) * len);
+        ctx.lineTo(Math.cos(a2) * len, Math.sin(a2) * len);
+        ctx.lineTo(Math.cos(a2) * ballRadius * 0.2, Math.sin(a2) * ballRadius * 0.2);
+        ctx.closePath();
+        ctx.fillStyle = grad;
+        ctx.fill();
+      }
+
+      // Switch back to screen for bright glowing highlights
+      ctx.globalCompositeOperation = 'screen';
+
+      // Bright central glow
+      const cg = ctx.createRadialGradient(0, 0, 0, 0, 0, ballRadius * 2.2 * bassMul);
+      cg.addColorStop(0, `rgba(255, 245, 255, ${0.45 * bassMul})`);
+      cg.addColorStop(0.25, `rgba(220, 180, 255, ${0.20 * bassMul})`);
+      cg.addColorStop(0.6, `rgba(150, 100, 220, ${0.05 * bassMul})`);
+      cg.addColorStop(1, 'transparent');
+      ctx.fillStyle = cg;
+      ctx.fillRect(-ballRadius * 3, -ballRadius * 3, ballRadius * 6, ballRadius * 6);
+
+      // Layer 2: Bright accent beams — fewer, brighter, distinct rays
+      const accents = 16;
+      for (let i = 0; i < accents; i++) {
+        const angle = (i / accents) * Math.PI * 2 + time * 0.10 + 0.5;
+        const hue = ((i / accents) * 360 + time * 30 + 60) % 360;
+        const width = 0.08 + 0.04 * Math.sin(time * 2.5 + i * 1.1);
+        const len = maxLen * 0.95 * (0.85 + 0.15 * Math.sin(time * 1.8 + i)) * bassMul;
+        const alpha = (0.08 + 0.06 * Math.sin(time * 3 + i * 1.3)) * bassMul;
+
+        const grad = ctx.createLinearGradient(0, 0, Math.cos(angle) * len, Math.sin(angle) * len);
+        grad.addColorStop(0, `hsla(${hue}, 100%, 90%, ${alpha * 3})`);
+        grad.addColorStop(0.15, `hsla(${hue}, 100%, 75%, ${alpha * 1.5})`);
+        grad.addColorStop(0.5, `hsla(${hue}, 90%, 60%, ${alpha * 0.4})`);
+        grad.addColorStop(1, 'transparent');
+
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(angle - width) * ballRadius * 0.3, Math.sin(angle - width) * ballRadius * 0.3);
+        ctx.lineTo(Math.cos(angle) * len, Math.sin(angle) * len);
+        ctx.lineTo(Math.cos(angle + width) * ballRadius * 0.3, Math.sin(angle + width) * ballRadius * 0.3);
+        ctx.closePath();
+        ctx.fillStyle = grad;
+        ctx.fill();
+      }
+
+      ctx.restore();
+    }
+
+    // --- Disco Ball (Circular Metallic Tiles with Physics Reflections) ---
+    function drawDiscoBall(time, energy) {
+      const bassMul = 1 + energy.bass * 0.3;
+
+      // Ambient glow behind ball
+      const glowSize = ballRadius * 2.5 * bassMul;
+      const glow = ctx.createRadialGradient(centerX, centerY, ballRadius * 0.5, centerX, centerY, glowSize);
+      glow.addColorStop(0, 'rgba(200, 190, 220, 0.18)');
+      glow.addColorStop(0.5, 'rgba(140, 120, 180, 0.06)');
+      glow.addColorStop(1, 'transparent');
+      ctx.fillStyle = glow;
+      ctx.fillRect(centerX - glowSize, centerY - glowSize, glowSize * 2, glowSize * 2);
+
+      // Sphere parameters
+      const rotY = time * 0.4;
+      const rotX = 0.3;
+      const tileRows = 20;
+      const cosRx = Math.cos(rotX), sinRx = Math.sin(rotX);
+      const perspective = 3.5;
+
+      // Solid opaque backing sphere (black/dark gray)
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, ballRadius * 0.98, 0, Math.PI * 2);
+      ctx.fillStyle = '#111';
+      ctx.fill();
+
+      // Collect visible tiles for depth sorting
+      const tiles = [];
+
+      for (let row = 0; row < tileRows; row++) {
+        const phi1 = (row / tileRows) * Math.PI;
+        const phi2 = ((row + 1) / tileRows) * Math.PI;
+        const y1 = Math.cos(phi1);
+        const y2 = Math.cos(phi2);
+        const r1 = Math.sin(phi1);
+        const r2 = Math.sin(phi2);
+
+        // Calculate tile center for normals
+        const phiC = ((row + 0.5) / tileRows) * Math.PI;
+        const yC = Math.cos(phiC);
+        const rC = Math.sin(phiC);
+
+        const tileCols = Math.max(4, Math.floor(tileRows * 2 * rC));
+
+        for (let col = 0; col < tileCols; col++) {
+          const theta1 = (col / tileCols) * Math.PI * 2 + rotY;
+          const theta2 = ((col + 1) / tileCols) * Math.PI * 2 + rotY;
+          const thetaC = ((col + 0.5) / tileCols) * Math.PI * 2 + rotY;
+
+          // 3D corners of the tile (square/trapezoid on sphere surface)
+          const corners3D = [
+            [r1 * Math.cos(theta1), y1, r1 * Math.sin(theta1)],
+            [r1 * Math.cos(theta2), y1, r1 * Math.sin(theta2)],
+            [r2 * Math.cos(theta2), y2, r2 * Math.sin(theta2)],
+            [r2 * Math.cos(theta1), y2, r2 * Math.sin(theta1)],
+          ];
+
+          // Center of the tile
+          const cx3 = rC * Math.cos(thetaC);
+          const cy3 = yC;
+          const cz3 = rC * Math.sin(thetaC);
+
+          // Apply tilt rotation (X axis)
+          const ry = cy3 * cosRx - cz3 * sinRx;
+          const rz = cy3 * sinRx + cz3 * cosRx;
+
+          // Back-face culling
+          if (rz < -0.05) continue;
+
+          // Project corners
+          const projected = corners3D.map(([x, y, z]) => {
+            const ny = y * cosRx - z * sinRx;
+            const nz = y * sinRx + z * cosRx;
+            const scale = perspective / (perspective + nz);
+            return [centerX + x * ballRadius * scale, centerY - ny * ballRadius * scale];
+          });
+
+          // Reflection angle: the tile's outward normal in screen-space XY
+          const reflAngle = Math.atan2(-ry, cx3);
+
+          tiles.push({ projected, rz, cx3, ry, reflAngle, row, col });
+        }
+      }
+
+      // Sort back-to-front
+      tiles.sort((a, b) => a.rz - b.rz);
+
+      // Draw each tile as a flat metallic mirror patch
+      for (const t of tiles) {
+        const { projected, rz, reflAngle } = t;
+        const facing = Math.max(0, rz); // 0 at edge, 1 at front
+
+        // Get reflected beam hue (physics: tile reflects light from beam at reflAngle)
+        const reflHue = getBeamHueAtAngle(reflAngle, time);
+
+        // Draw the flat tile polygon
+        ctx.beginPath();
+        ctx.moveTo(projected[0][0], projected[0][1]);
+        for (let k = 1; k < 4; k++) {
+          ctx.lineTo(projected[k][0], projected[k][1]);
+        }
+        ctx.closePath();
+
+        // Base metallic color reflecting the environment
+        const sat = 65 + facing * 35; // 65-100% saturation
+        const light = 35 + facing * 45; // 35-80% lightness
+        ctx.fillStyle = `hsl(${reflHue}, ${sat}%, ${light}%)`;
+        ctx.fill();
+
+        // Draw an inner bright highlight to simulate a flat glass/mirror bevel
+        ctx.strokeStyle = `hsla(${reflHue}, 100%, 90%, ${0.2 + facing * 0.6})`;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // Draw darker outer bevel (gap between mirrors)
+        ctx.strokeStyle = '#111';
+        ctx.lineWidth = 2; // Dark grout between tiles
+        ctx.stroke();
+
+        // Extra bright specular flash on some front tiles to simulate intense laser reflection
+        if (facing > 0.7 && Math.sin(time * 3.5 + t.row * 7.3 + t.col * 11.7) > 0.85) {
+          ctx.fillStyle = `rgba(255, 255, 255, ${0.4 + facing * 0.4})`;
+          ctx.fill();
+        }
+      }
+
+      // Overall ball specular highlight (upper-left sheen)
+      const specGrad = ctx.createRadialGradient(
+        centerX - ballRadius * 0.25, centerY - ballRadius * 0.3, 0,
+        centerX - ballRadius * 0.1, centerY - ballRadius * 0.15, ballRadius * 0.55
+      );
+      specGrad.addColorStop(0, 'rgba(255,255,255,0.22)');
+      specGrad.addColorStop(0.5, 'rgba(255,255,255,0.05)');
+      specGrad.addColorStop(1, 'transparent');
+      ctx.fillStyle = specGrad;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, ballRadius * 0.85, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // --- Reflected Light Dots (on walls) ---
+    const reflections = Array.from({ length: 120 }, () => ({
+      angle: Math.random() * Math.PI * 2,
+      dist: 0.5 + Math.random() * 0.5,
+      speed: (Math.random() - 0.5) * 0.02,
+      size: 2 + Math.random() * 8,
+      hue: Math.random() * 360,
+      phase: Math.random() * Math.PI * 2,
+    }));
+
+    function drawReflections(time, energy) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      const mul = 1 + energy.overall * 0.5;
+
+      for (const r of reflections) {
+        const angle = r.angle + time * r.speed;
+        const maxDist = Math.min(W, H) * 0.48;
+        const dist = maxDist * r.dist;
+        const x = centerX + Math.cos(angle) * dist;
+        const y = centerY + Math.sin(angle) * dist;
+        const alpha = (0.15 + 0.15 * Math.sin(time * 3 + r.phase)) * mul;
+        const size = r.size * mul;
+
+        const g = ctx.createRadialGradient(x, y, 0, x, y, size);
+        g.addColorStop(0, `hsla(${(r.hue + time * 20) % 360}, 80%, 70%, ${alpha})`);
+        g.addColorStop(1, 'transparent');
+        ctx.fillStyle = g;
+        ctx.fillRect(x - size, y - size, size * 2, size * 2);
+      }
+      ctx.restore();
+    }
+
+    // --- Visualizer Update ---
+    function updateVisualizer() {
+      if (!audioReady) return;
+      analyser.getByteFrequencyData(freqData);
+      const bars = vizEl.children;
+      const step = Math.floor(freqData.length / bars.length);
+      for (let i = 0; i < bars.length; i++) {
+        const val = freqData[i * step] / 255;
+        bars[i].style.height = (val * 70 + 2) + 'px';
+      }
+    }
+
+    // --- Main Render Loop ---
+    let startTime = performance.now();
+
+    function render() {
+      const now = performance.now();
+      const time = (now - startTime) / 1000;
+      const energy = getAudioEnergy();
+
+      // Clear
+      ctx.clearRect(0, 0, W, H);
+
+      // Background gradient
+      const bgGrad = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, Math.max(W, H) * 0.7);
+      bgGrad.addColorStop(0, `rgba(15, 5, 30, 1)`);
+      bgGrad.addColorStop(0.5, `rgba(5, 2, 15, 1)`);
+      bgGrad.addColorStop(1, `rgba(0, 0, 0, 1)`);
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, W, H);
+
+      // Draw layers
+      drawReflections(time, energy);
+      drawLightBeams(time, energy);
+      drawDiscoBall(time, energy);
+
+      // Sparkles
+      for (const s of sparkles) {
+        s.update(energy);
+        s.draw(ctx);
+      }
+
+      // Visualizer
+      updateVisualizer();
+
+      requestAnimationFrame(render);
+    }
+
+    render();
+  })();
+  </script>
+</body>
+</html>
