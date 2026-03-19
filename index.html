@@ -1053,7 +1053,8 @@
         const intensityScale = Math.max(1, novaIntensity);
 
         // Scale up the size of the flare based on excess intensity
-        const maxDist = Math.max(W, H) * 1.5 * intensityScale;
+        // Reduced max radius from 1.5 to 1.1 so it doesn't completely blow out the entire screen edges
+        const maxDist = Math.max(W, H) * 1.1 * intensityScale;
 
         const glareGrad = ctx.createRadialGradient(novaX, novaY, 0, novaX, novaY, maxDist);
         glareGrad.addColorStop(0, `rgba(255, 255, 255, ${bloomAlpha * 0.8})`);
@@ -1065,8 +1066,8 @@
         ctx.fillStyle = glareGrad;
         ctx.fillRect(0, 0, W, H);
 
-        // Slower decay for lingering exposure (frame rate independent)
-        novaIntensity *= Math.pow(0.98, timeScale);
+        // Medium decay to balance between "too fast" and "too slow"
+        novaIntensity *= Math.pow(0.95, timeScale);
         ctx.restore();
       }
 
