@@ -477,6 +477,13 @@
       return { bass, mid, treble, overall };
     }
 
+    // --- Nova Flash Engine Variables ---
+    let novaIntensity = 0;
+    let novaHue = 0;
+    let novaX = 0;
+    let novaY = 0;
+    let lastNovaTime = 0;
+
     // --- Sparkle System ---
     class Sparkle {
       constructor(isHero = false) {
@@ -489,35 +496,55 @@
         this.x = centerX + Math.cos(angle) * dist;
         this.y = centerY + Math.sin(angle) * dist;
         if (this.isHero) {
-          this.size = 15 + Math.random() * 25;
-          this.maxAlpha = 0.7 + Math.random() * 0.3;
-          this.speed = 0.015 + Math.random() * 0.025;
-          this.maxLife = 100 + Math.random() * 160;
-          this.glowMul = 3.5;
+          this.size = 25 + Math.random() * 40;
+          this.maxAlpha = 1.0 + Math.random() * 0.8;
+          this.speed = 0.04 + Math.random() * 0.06;
+          this.maxLife = 60 + Math.random() * 80;
+          this.glowMul = 4.5;
         } else {
-          this.size = 2 + Math.random() * 6;
-          this.maxAlpha = 0.4 + Math.random() * 0.6;
-          this.speed = 0.02 + Math.random() * 0.04;
-          this.maxLife = 60 + Math.random() * 120;
-          this.glowMul = 2;
+          this.size = 4 + Math.random() * 10;
+          this.maxAlpha = 0.8 + Math.random() * 0.8;
+          this.speed = 0.05 + Math.random() * 0.08;
+          this.maxLife = 40 + Math.random() * 70;
+          this.glowMul = 3.0;
         }
         this.alpha = 0;
         this.phase = Math.random() * Math.PI * 2;
         this.life = 0;
         this.hue = Math.random() * 360;
       }
-      update(energy) {
+      update(energy, time) {
         this.life++;
-        const speedMul = 1 + energy.treble * 2;
+        const speedMul = 1 + energy.treble * 4;
+        const oldPhase = this.phase;
         this.phase += this.speed * speedMul;
-        this.alpha = this.maxAlpha * Math.pow(Math.sin(this.phase), 2);
+        
+        // Detect when a strong hero sparkle hits its peak
+        if (this.isHero && this.maxAlpha > 1.2) {
+          const peak = Math.PI / 2;
+          const modOld = oldPhase % Math.PI;
+          const modNew = this.phase % Math.PI;
+          // If crossed the PI/2 peak and time is ready to burst again
+          if (modOld <= peak && modNew >= peak) {
+            if (time > lastNovaTime + 1.2 && Math.random() > 0.5) {
+              novaIntensity = 1.0;
+              novaHue = this.hue;
+              novaX = this.x;
+              novaY = this.y;
+              lastNovaTime = time;
+            }
+          }
+        }
+        
+        this.alpha = this.maxAlpha * Math.pow(Math.sin(this.phase), 6);
         if (this.life > this.maxLife) this.reset();
       }
       draw(ctx) {
         if (this.alpha < 0.01) return;
         ctx.save();
+        ctx.globalCompositeOperation = 'screen';
         ctx.translate(this.x, this.y);
-        ctx.globalAlpha = this.alpha;
+        ctx.globalAlpha = Math.min(1, this.alpha);
 
         const s = this.size;
         // Outer glow first (behind the star)
@@ -868,29 +895,142 @@
       ctx.fill();
     }
 
+    // --- Intermittent Rainbow Halos ---
+    let haloIntensity = 0;
+    let nextHaloTime = 1;
+
+    function drawRainbowHalo(time, energy) {
+      // Trigger: appear instantly, then decay quickly
+      if (haloIntensity <= 0 && time > nextHaloTime) {
+        haloIntensity = 1.0; // instant full brightness
+        nextHaloTime = time + 1.5 + Math.random() * 2.5; // much more frequent: 1.5 to 4s
+      }
+
+      if (haloIntensity < 0.01) {
+        haloIntensity = 0; // snap to zero so it can re-trigger
+        return;
+      }
+
+      // Quick decay — disappear within ~0.8s
+      haloIntensity *= 0.96;
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+
+      const alpha = haloIntensity;
+
+      // === Outer rainbow halo (centered on ball) ===
+      const outerInner = ballRadius * 1.8;
+      const outerOuter = ballRadius * 2.6;
+      const outerGrad = ctx.createRadialGradient(
+        centerX, centerY, outerInner,
+        centerX, centerY, outerOuter
+      );
+      outerGrad.addColorStop(0, 'transparent');
+      outerGrad.addColorStop(0.05, `rgba(255, 0, 0, ${alpha * 0.25})`);
+      outerGrad.addColorStop(0.18, `rgba(255, 165, 0, ${alpha * 0.3})`);
+      outerGrad.addColorStop(0.30, `rgba(255, 255, 0, ${alpha * 0.3})`);
+      outerGrad.addColorStop(0.45, `rgba(0, 255, 0, ${alpha * 0.28})`);
+      outerGrad.addColorStop(0.58, `rgba(0, 200, 255, ${alpha * 0.25})`);
+      outerGrad.addColorStop(0.72, `rgba(0, 80, 255, ${alpha * 0.22})`);
+      outerGrad.addColorStop(0.88, `rgba(140, 0, 255, ${alpha * 0.18})`);
+      outerGrad.addColorStop(1, 'transparent');
+
+      ctx.fillStyle = outerGrad;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, outerOuter, 0, Math.PI * 2);
+      ctx.fill();
+
+      // === Inner smaller rainbow halo (offset upper-left) ===
+      const offsetX = centerX - ballRadius * 0.35;
+      const offsetY = centerY - ballRadius * 0.35;
+      const innerInner = ballRadius * 0.5; // Inner edge passes exactly through ball center
+      const innerOuter = ballRadius * 1.3; // Make it thicker
+      const innerGrad = ctx.createRadialGradient(
+        offsetX, offsetY, innerInner,
+        offsetX, offsetY, innerOuter
+      );
+      // Boost alpha for visibility since it's smaller
+      innerGrad.addColorStop(0, 'transparent');
+      innerGrad.addColorStop(0.08, `rgba(255, 0, 0, ${alpha * 0.35})`);
+      innerGrad.addColorStop(0.22, `rgba(255, 165, 0, ${alpha * 0.4})`);
+      innerGrad.addColorStop(0.36, `rgba(255, 255, 0, ${alpha * 0.4})`);
+      innerGrad.addColorStop(0.50, `rgba(0, 255, 0, ${alpha * 0.35})`);
+      innerGrad.addColorStop(0.64, `rgba(0, 200, 255, ${alpha * 0.3})`);
+      innerGrad.addColorStop(0.78, `rgba(0, 80, 255, ${alpha * 0.25})`);
+      innerGrad.addColorStop(0.92, `rgba(140, 0, 255, ${alpha * 0.2})`);
+      innerGrad.addColorStop(1, 'transparent');
+
+      ctx.fillStyle = innerGrad;
+      ctx.beginPath();
+      ctx.arc(offsetX, offsetY, innerOuter, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Optional: Add a few tiny lens flare artifacts to complete the "sun" look
+      const artAlpha = alpha * 0.5;
+      ctx.fillStyle = `rgba(180, 255, 200, ${artAlpha})`;
+      ctx.beginPath();
+      ctx.arc(centerX + ballRadius * 0.6, centerY + ballRadius * 0.6, ballRadius * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = `rgba(255, 180, 255, ${artAlpha * 0.5})`;
+      ctx.beginPath();
+      ctx.arc(centerX + ballRadius * 1.2, centerY + ballRadius * 1.2, ballRadius * 0.25, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    // --- Nova Flash Engine ---
+    function drawNovaFlashes(time, energy) {
+      if (novaIntensity <= 0.01) return;
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      
+      const fAlpha = Math.min(1, novaIntensity);
+      
+      // Bright point source radial glare illuminating the whole scene
+      const maxDist = Math.max(W, H) * 1.5;
+      const glareGrad = ctx.createRadialGradient(novaX, novaY, 0, novaX, novaY, maxDist);
+      glareGrad.addColorStop(0, `rgba(255, 255, 255, ${fAlpha})`);
+      glareGrad.addColorStop(0.05, `rgba(255, 255, 255, ${fAlpha * 0.9})`);
+      glareGrad.addColorStop(0.15, `hsla(${novaHue}, 100%, 85%, ${fAlpha * 0.6})`);
+      glareGrad.addColorStop(0.4, `hsla(${novaHue}, 80%, 60%, ${fAlpha * 0.2})`);
+      glareGrad.addColorStop(1, 'transparent');
+      
+      ctx.fillStyle = glareGrad;
+      ctx.fillRect(0, 0, W, H);
+
+      // Flash decay
+      novaIntensity *= 0.88; 
+      ctx.restore();
+    }
+
     // --- Reflected Light Dots (on walls) ---
-    const reflections = Array.from({ length: 120 }, () => ({
+    const reflections = Array.from({ length: 150 }, () => ({
       angle: Math.random() * Math.PI * 2,
-      dist: 0.5 + Math.random() * 0.5,
-      speed: (Math.random() - 0.5) * 0.02,
-      size: 2 + Math.random() * 8,
+      dist: 0.1 + Math.random() * 0.9,
+      speed: (Math.random() - 0.5) * 0.08,
+      size: 3 + Math.random() * 15,
       hue: Math.random() * 360,
       phase: Math.random() * Math.PI * 2,
+      blinkSpeed: 4 + Math.random() * 8
     }));
 
     function drawReflections(time, energy) {
       ctx.save();
       ctx.globalCompositeOperation = 'screen';
-      const mul = 1 + energy.overall * 0.5;
+      const mul = 1 + energy.overall * 2.5;
 
       for (const r of reflections) {
         const angle = r.angle + time * r.speed;
-        const maxDist = Math.min(W, H) * 0.48;
+        const maxDist = Math.min(W, H) * 0.7;
         const dist = maxDist * r.dist;
         const x = centerX + Math.cos(angle) * dist;
         const y = centerY + Math.sin(angle) * dist;
-        const alpha = (0.15 + 0.15 * Math.sin(time * 3 + r.phase)) * mul;
-        const size = r.size * mul;
+        
+        let blink = Math.pow(Math.sin(time * r.blinkSpeed + r.phase), 4);
+        const alpha = Math.min(1, (0.1 + 0.8 * blink) * mul);
+        const size = r.size * mul * (0.5 + 0.5 * blink);
 
         const g = ctx.createRadialGradient(x, y, 0, x, y, size);
         g.addColorStop(0, `hsla(${(r.hue + time * 20) % 360}, 80%, 70%, ${alpha})`);
@@ -940,11 +1080,16 @@
       drawLightBeams(time, energy);
       drawDiscoBall(time, energy);
 
+      // Render halo flare ON TOP of the ball so it's clearly visible as a lens artifact
+      drawRainbowHalo(time, energy);
+
       // Sparkles
       for (const s of sparkles) {
-        s.update(energy);
+        s.update(energy, time);
         s.draw(ctx);
       }
+
+      drawNovaFlashes(time, energy);
 
       // Visualizer
       updateVisualizer();
