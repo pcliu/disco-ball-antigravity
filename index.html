@@ -3,7 +3,8 @@
 
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="description" content="Interactive colorful disco ball with music and light effects">
   <title>✨ Disco Ball Party ✨</title>
   <link
@@ -572,11 +573,11 @@
           this.life = 0;
           this.hue = Math.random() * 360;
         }
-        update(energy, time) {
-          this.life++;
+        update(energy, time, timeScale) {
+          this.life += timeScale;
           const speedMul = 1 + energy.treble * 4;
           const oldPhase = this.phase;
-          this.phase += this.speed * speedMul;
+          this.phase += this.speed * speedMul * timeScale;
 
           // Detect when a strong hero sparkle hits its peak
           if (this.isHero && this.maxAlpha > 1.2) {
@@ -587,7 +588,7 @@
             if (modOld <= peak && modNew >= peak) {
               // Give 3.0 seconds cooldown to allow the massive glaring fade
               if (time > lastNovaTime + 3.0 && Math.random() > 0.4) {
-                novaIntensity = 1.35; // Medium-high peak intensity for a strong but not overwhelming flash
+                novaIntensity = 1.0; // Softened peak intensity to prevent over-glare
                 novaHue = this.hue;
                 novaX = this.x;
                 novaY = this.y;
@@ -959,7 +960,7 @@
       let haloIntensity = 0;
       let nextHaloTime = 1;
 
-      function drawRainbowHalo(time, energy) {
+      function drawRainbowHalo(time, energy, timeScale) {
         // Trigger: appear instantly, then decay quickly
         if (haloIntensity <= 0 && time > nextHaloTime) {
           haloIntensity = 1.0; // instant full brightness
@@ -971,8 +972,8 @@
           return;
         }
 
-        // Quick decay — disappear within ~0.8s
-        haloIntensity *= 0.96;
+        // Quick decay — independent of frame rate
+        haloIntensity *= Math.pow(0.96, timeScale);
 
         ctx.save();
         ctx.globalCompositeOperation = 'screen';
@@ -1041,7 +1042,7 @@
       }
 
       // --- Nova Flash Engine ---
-      function drawNovaFlashes(time, energy) {
+      function drawNovaFlashes(time, energy, timeScale) {
         if (novaIntensity <= 0.01) return;
         ctx.save();
 
@@ -1055,17 +1056,17 @@
         const maxDist = Math.max(W, H) * 1.5 * intensityScale;
 
         const glareGrad = ctx.createRadialGradient(novaX, novaY, 0, novaX, novaY, maxDist);
-        glareGrad.addColorStop(0, `rgba(255, 255, 255, ${bloomAlpha * 0.9})`);
-        glareGrad.addColorStop(0.1, `rgba(255, 255, 255, ${bloomAlpha * 0.8})`);
-        glareGrad.addColorStop(0.3, `hsla(${novaHue}, 100%, 85%, ${bloomAlpha * 0.55})`);
+        glareGrad.addColorStop(0, `rgba(255, 255, 255, ${bloomAlpha * 0.8})`);
+        glareGrad.addColorStop(0.1, `rgba(255, 255, 255, ${bloomAlpha * 0.65})`);
+        glareGrad.addColorStop(0.3, `hsla(${novaHue}, 100%, 85%, ${bloomAlpha * 0.45})`);
         glareGrad.addColorStop(0.6, `hsla(${novaHue}, 100%, 60%, ${bloomAlpha * 0.25})`);
         glareGrad.addColorStop(1, 'transparent');
 
         ctx.fillStyle = glareGrad;
         ctx.fillRect(0, 0, W, H);
 
-        // Slower decay for lingering exposure
-        novaIntensity *= 0.98;
+        // Slower decay for lingering exposure (frame rate independent)
+        novaIntensity *= Math.pow(0.98, timeScale);
         ctx.restore();
       }
 
@@ -1122,9 +1123,19 @@
 
       // --- Main Render Loop ---
       let startTime = performance.now();
+      let lastTime = startTime;
 
       function render() {
         const now = performance.now();
+        const dt = (now - lastTime) / 1000;
+        lastTime = now;
+        
+        // Time scale: 1.0 = exactly 60fps frame duration. 
+        // 120Hz screens will have timeScale ~ 0.5. 
+        // Cap the max dt in case user switches tabs to prevent huge jumps.
+        const safeDt = Math.min(dt, 0.1);
+        const timeScale = safeDt * 60;
+
         const time = (now - startTime) / 1000;
         const energy = getAudioEnergy();
 
@@ -1145,15 +1156,15 @@
         drawDiscoBall(time, energy);
 
         // Render halo flare ON TOP of the ball so it's clearly visible as a lens artifact
-        drawRainbowHalo(time, energy);
+        drawRainbowHalo(time, energy, timeScale);
 
         // Sparkles
         for (const s of sparkles) {
-          s.update(energy, time);
+          s.update(energy, time, timeScale);
           s.draw(ctx);
         }
 
-        drawNovaFlashes(time, energy);
+        drawNovaFlashes(time, energy, timeScale);
 
         // Visualizer
         updateVisualizer();
