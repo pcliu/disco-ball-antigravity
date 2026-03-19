@@ -556,16 +556,16 @@
           this.x = centerX + Math.cos(angle) * dist;
           this.y = centerY + Math.sin(angle) * dist;
           if (this.isHero) {
-            this.size = 25 + Math.random() * 40;
+            this.size = 15 + Math.random() * 25; // Scaled down size
             this.maxAlpha = 1.0 + Math.random() * 0.8;
-            this.speed = 0.04 + Math.random() * 0.06;
-            this.maxLife = 60 + Math.random() * 80;
+            this.speed = 0.025 + Math.random() * 0.04; // Slower twinkling
+            this.maxLife = 80 + Math.random() * 100; // Lives longer to compensate slower speed
             this.glowMul = 4.5;
           } else {
-            this.size = 4 + Math.random() * 10;
-            this.maxAlpha = 0.8 + Math.random() * 0.8;
-            this.speed = 0.05 + Math.random() * 0.08;
-            this.maxLife = 40 + Math.random() * 70;
+            this.size = 2 + Math.random() * 6; // Scaled down size
+            this.maxAlpha = 0.7 + Math.random() * 0.7;
+            this.speed = 0.03 + Math.random() * 0.05; // Slower twinkling
+            this.maxLife = 60 + Math.random() * 90;
             this.glowMul = 3.0;
           }
           this.alpha = 0;
@@ -586,9 +586,9 @@
             const modNew = this.phase % Math.PI;
             // If crossed the PI/2 peak and time is ready to burst again
             if (modOld <= peak && modNew >= peak) {
-              // Give 3.0 seconds cooldown to allow the massive glaring fade
-              if (time > lastNovaTime + 3.0 && Math.random() > 0.4) {
-                novaIntensity = 1.0; // Softened peak intensity to prevent over-glare
+              // Raised cooldown from 3.0s to 5.0s to lower frequency
+              if (time > lastNovaTime + 5.0 && Math.random() > 0.4) {
+                novaIntensity = 1.0; 
                 novaHue = this.hue;
                 novaX = this.x;
                 novaY = this.y;
@@ -643,10 +643,10 @@
         }
       }
 
-      // 70 normal sparkles + 8 large hero sparkles
+      // Lower density: 40 normal + 5 hero sparkles
       const sparkles = [
-        ...Array.from({ length: 70 }, () => new Sparkle(false)),
-        ...Array.from({ length: 8 }, () => new Sparkle(true)),
+        ...Array.from({ length: 40 }, () => new Sparkle(false)),
+        ...Array.from({ length: 5 }, () => new Sparkle(true)),
       ];
 
       // --- Global beam rotation offset (used by both beams and ball reflections) ---
@@ -964,7 +964,7 @@
         // Trigger: appear instantly, then decay quickly
         if (haloIntensity <= 0 && time > nextHaloTime) {
           haloIntensity = 1.0; // instant full brightness
-          nextHaloTime = time + 1.5 + Math.random() * 2.5; // much more frequent: 1.5 to 4s
+          nextHaloTime = time + 3.0 + Math.random() * 5.0; // Lower frequency: 3 to 8s
         }
 
         if (haloIntensity < 0.01) {
@@ -1052,9 +1052,9 @@
         const bloomAlpha = Math.min(1, novaIntensity);
         const intensityScale = Math.max(1, novaIntensity);
 
-        // Scale up the size of the flare based on excess intensity
-        // Reduced max radius from 1.5 to 1.1 so it doesn't completely blow out the entire screen edges
-        const maxDist = Math.max(W, H) * 1.1 * intensityScale;
+        // Use average of width and height so tall mobile screens don't get blown out by massive vertical heights
+        const screenMetric = (W + H) / 2;
+        const maxDist = screenMetric * 1.0 * intensityScale;
 
         const glareGrad = ctx.createRadialGradient(novaX, novaY, 0, novaX, novaY, maxDist);
         glareGrad.addColorStop(0, `rgba(255, 255, 255, ${bloomAlpha * 0.8})`);
