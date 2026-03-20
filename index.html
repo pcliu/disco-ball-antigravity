@@ -455,6 +455,28 @@
       }
       loadLyrics();
 
+      // --- MatCap Texture Setup ---
+      let matcapData = null;
+      let matcapWidth = 0;
+      let matcapHeight = 0;
+
+      const textureImg = new Image();
+      textureImg.src = 'img/texture.png';
+      textureImg.onload = () => {
+        const offscreen = document.createElement('canvas');
+        // Heavily downsample to act as a blur and eliminate grid line strobing noise
+        matcapWidth = 64;
+        matcapHeight = 64;
+        offscreen.width = matcapWidth;
+        offscreen.height = matcapHeight;
+        const oCtx = offscreen.getContext('2d', { willReadFrequently: true });
+        
+        // Boost brightness to compensate for blurred black lines
+        oCtx.filter = 'brightness(1.5) contrast(1.1)';
+        oCtx.drawImage(textureImg, 0, 0, matcapWidth, matcapHeight);
+        matcapData = oCtx.getImageData(0, 0, matcapWidth, matcapHeight).data;
+      };
+
       function updateLyrics(time) {
         if (!isPlaying || !audio || lyricsData.length === 0) return;
 
@@ -781,7 +803,7 @@
         // Sphere parameters
         const rotY = time * 0.4;
         const rotX = 0.3;
-        const tileRows = 16; // Decreased rows to make tiles significantly larger
+        const tileRows = 30; // Increased rows closer to reality, dense geometry
         const cosRx = Math.cos(rotX), sinRx = Math.sin(rotX);
         const perspective = 3.5;
 
@@ -808,136 +830,116 @@
         // Collect visible tiles for depth sorting
         const tiles = [];
 
-        for (let row = 0; row < tileRows; row++) {
-          // Calculate tile center
-          const phiC = ((row + 0.5) / tileRows) * Math.PI;
-          const yC = Math.cos(phiC);
-          const rC = Math.sin(phiC);
+        // Helper to project any 3D spherical coordinate to 2D screen coordinate
+        const projectPoint = (phi, theta) => {
+          const r = Math.sin(phi);
+          const y = Math.cos(phi);
+          const x = r * Math.cos(theta);
+          const z = r * Math.sin(theta);
+          const ry = y * cosRx - z * sinRx;
+          const rz = y * sinRx + z * cosRx;
+          const scale = perspective / (perspective + rz);
+          return {
+            px: centerX + x * ballRadius * scale,
+            py: centerY - ry * ballRadius * scale,
+            nz: rz
+          };
+        };
 
-          // Adjust columns based on latitude so circles remain roughly same physical size
-          // Use ~2.1 multiplier to balance horizontal spacing for larger tiles
+        for (let row = 0; row < tileRows; row++) {
+          const phi1 = (row / tileRows) * Math.PI;
+          const phi2 = ((row + 1) / tileRows) * Math.PI;
+          
+          // Use the row's midpoint to calculate circumference (for squareness ratio)
+          const phiC = (phi1 + phi2) / 2;
+          const rC = Math.sin(phiC);
           const tileCols = Math.max(4, Math.floor(tileRows * 2.1 * rC));
 
           for (let col = 0; col < tileCols; col++) {
-            const thetaC = ((col + 0.5) / tileCols) * Math.PI * 2 + rotY;
+            const theta1 = (col / tileCols) * Math.PI * 2 + rotY;
+            const theta2 = ((col + 1) / tileCols) * Math.PI * 2 + rotY;
 
-            // Center of the tile
+            // --- Compute True Normal for Lighting & Texture Sampling ---
+            const thetaC = (theta1 + theta2) / 2;
             const cx3 = rC * Math.cos(thetaC);
-            const cy3 = yC;
+            const cy3 = Math.cos(phiC);
             const cz3 = rC * Math.sin(thetaC);
 
-            // Apply tilt rotation (X axis) to get final 3D normal for the tile
             const ry = cy3 * cosRx - cz3 * sinRx;
             const rz = cy3 * sinRx + cz3 * cosRx;
 
-            // The tile's true 3D normal vector (nx, ny, nz)
             const nx = cx3;
             const ny = ry;
             const nz = rz;
 
-            // Back-face culling
+            // Back-face cull the entire quad if its center points away from the camera
             if (nz < -0.05) continue;
 
-            // Project center to 2D
-            const scale = perspective / (perspective + nz);
-            const px = centerX + cx3 * ballRadius * scale;
-            const py = centerY - ry * ballRadius * scale;
+            // --- Plot exactly 4 quad corners on the 3D surface projected to 2D ---
+            const c1 = projectPoint(phi1, theta1);
+            const c2 = projectPoint(phi1, theta2);
+            const c3 = projectPoint(phi2, theta2);
+            const c4 = projectPoint(phi2, theta1);
 
-            // Ideal circular radius of this sticker on the screen
-            // Increased size multiplier slightly to fill space better with fewer rows
-            const baseRadius = (ballRadius * Math.PI / tileRows) * 0.46 * scale;
-
-            // Determine ellipse squash based on surface normal facing the camera
-            const squash = Math.max(0.1, nz);
-
-            // The ellipse minor axis points towards the center of the sphere in 2D
-            const angleToCenter = Math.atan2(py - centerY, px - centerX);
-
-            // Reflection angle: the tile's outward normal in screen-space XY
             const reflAngle = Math.atan2(-ny, nx);
 
-            // Calculate dynamic specular highlights from all roaming light sources
-            let totalSpecular = 0;
-
-            // The view vector is looking straight down the Z axis towards the ball
-            const vx = 0, vy = 0, vz = 1;
-
-            for (let ls of lightSources) {
-              // Half-vector between view direction and light source direction
-              let hx = ls.nx + vx;
-              let hy = ls.ny + vy;
-              let hz = ls.nz + vz;
-              const hlen = Math.hypot(hx, hy, hz);
-              hx /= hlen; hy /= hlen; hz /= hlen;
-
-              // Dot product of tile normal and half-vector (Blinn-Phong specular)
-              let nDotH = nx * hx + ny * hy + nz * hz;
-              if (nDotH > 0) {
-                // High shininess exponent for sharp mirrored reflections
-                const spec = Math.pow(nDotH, 80) * ls.intensity;
-                totalSpecular += spec * 1.5; // Boost visibility
-              }
-            }
-
-            tiles.push({ px, py, baseRadius, squash, angleToCenter, rz: nz, reflAngle, totalSpecular });
+            tiles.push({ 
+              corners: [c1, c2, c3, c4], 
+              nx, ny, rz: nz, reflAngle 
+            });
           }
         }
 
-        // Sort back-to-front
+        // Sort back-to-front (depth sorting)
         tiles.sort((a, b) => a.rz - b.rz);
 
-        // Draw each tile as a circular flat sequin/mirror
+        // Draw each quad map seamlessly
         for (const t of tiles) {
-          const { px, py, baseRadius, squash, angleToCenter, rz, reflAngle, totalSpecular } = t;
-          const facing = Math.max(0, rz); // 0 at edge, 1 at front
+          const { corners, nx, ny, rz, reflAngle } = t;
+          const facing = Math.max(0, rz);
 
-          // Get reflected beam hue (physics: tile reflects light from beam at reflAngle)
           const reflHue = getBeamHueAtAngle(reflAngle, time);
 
-          // Draw the perspective-distorted circular tile (ellipse)
           ctx.beginPath();
-          ctx.ellipse(
-            px, py,
-            baseRadius * squash, // minor axis (squashed by perspective)
-            baseRadius,          // major axis (un-squashed tangent to sphere surface)
-            angleToCenter,       // rotation to align squash towards sphere center
-            0, Math.PI * 2
-          );
+          ctx.moveTo(corners[0].px, corners[0].py);
+          ctx.lineTo(corners[1].px, corners[1].py);
+          ctx.lineTo(corners[2].px, corners[2].py);
+          ctx.lineTo(corners[3].px, corners[3].py);
+          ctx.closePath();
 
-          // Base metallic color reflecting the environment
-          const sat = 55 + facing * 45; // 55-100% saturation
-          const light = 40 + facing * 45; // 40-85% lightness
+          // --- MatCap Texture Sampling ---
+          if (matcapData && matcapWidth > 0 && matcapHeight > 0) {
+            let u = nx * 0.5 + 0.5;
+            let v = -ny * 0.5 + 0.5;
 
-          // Add a subtle metallic radial inner glow to make it look like a physical sequin
-          const tileGrad = ctx.createRadialGradient(px, py, 0, px, py, baseRadius);
-          tileGrad.addColorStop(0, `hsl(${reflHue}, ${sat}%, ${light + 10}%)`);
-          tileGrad.addColorStop(0.8, `hsl(${reflHue}, ${sat}%, ${light}%)`);
-          tileGrad.addColorStop(1, `hsl(${reflHue}, 30%, ${light - 20}%)`); // dark rim 
+            u = Math.max(0.02, Math.min(0.98, u));
+            v = Math.max(0.02, Math.min(0.98, v));
+            
+            const imgX = Math.floor(u * (matcapWidth - 1));
+            const imgY = Math.floor(v * (matcapHeight - 1));
+            const idx = (imgY * matcapWidth + imgX) * 4;
+            
+            let r = matcapData[idx];
+            let g = matcapData[idx + 1];
+            let b = matcapData[idx + 2];
+            
+            const shade = 0.5 + 0.5 * facing;
+            r = Math.floor(r * shade);
+            g = Math.floor(g * shade);
+            b = Math.floor(b * shade);
 
-          ctx.fillStyle = tileGrad;
+            ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+          } else {
+            const sat = 55 + facing * 45;
+            const light = 40 + facing * 45;
+            ctx.fillStyle = `hsl(${reflHue}, ${sat}%, ${light}%)`;
+          }
           ctx.fill();
 
-          // Dynamic roaming specular flash from external light sources
-          if (totalSpecular > 0.05) {
-            ctx.beginPath();
-            // The bright white highlight scales completely over the tile based on intensity
-            const specRadius = baseRadius * Math.min(1.0, totalSpecular * 1.2);
-            const specSquash = squash * Math.min(1.0, totalSpecular * 1.2);
-
-            if (specRadius > 0.1) {
-              ctx.ellipse(
-                px, py,
-                specRadius * specSquash,
-                specRadius,
-                angleToCenter,
-                0, Math.PI * 2
-              );
-
-              // Bright white to strong color bloom
-              ctx.fillStyle = `rgba(255, 255, 255, ${Math.min(1.0, totalSpecular * 1.5)})`;
-              ctx.fill();
-            }
-          }
+          // Perfect geometric grid lines — drawn strictly along the sphere surface!
+          ctx.strokeStyle = 'rgba(20, 20, 20, 0.9)';
+          ctx.lineWidth = 0.8;
+          ctx.stroke();
         }
 
         ctx.restore(); // Remove clipping mask for tiles
